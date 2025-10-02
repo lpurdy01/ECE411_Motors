@@ -1,0 +1,146 @@
+%% clean up
+clear; close; clc;
+
+%% Variables table for DC machiene C23_L55_20
+
+R = 1.43; % Ohms
+L = 2.38e-3; % H
+K = 0.0991; % Nm/A
+B = 0;
+Tl_initial = 0;
+Tl_final = 0;
+Tl_step_t = 0.05;
+Jm = 5.508e-5; % kg*m^2
+tau_m = 8.02; % ms
+tau_a = 1.664; % ms
+stim_step = 100; % rad/s
+
+Kpa = 2*pi()*300*L;
+Kia = 2*pi()*10*Kpa;
+
+Kpw = Jm*2*(2*pi()*40);
+Kiw = Jm*(2*pi()*40)^2;
+
+
+
+%% ====================== HW2 Q(f): Open-loop speed response ======================
+% Ensure the model uses these workspace values:
+stim_step  = 100;      % [rad/s] step at t=0 (speed command)
+Tl_initial = 0;        % [N·m]
+Tl_final   = 0.5;      % [N·m] step at t=0.05 s
+Tl_step_t  = 0.05;     % [s]
+
+mdl = 'f_open_loop_simulation';
+stopTime = '0.1';
+
+% Two cases: K = 100% and 300% of nominal
+K_nom  = 0.0991;
+K_list = [K_nom, 3*K_nom];
+lab    = ["K = 100%", "K = 300%"];
+col    = [0.10 0.70 0.10; 0.10 0.30 0.90];  % green, blue
+
+S = cell(1, numel(K_list));
+for i = 1:numel(K_list)
+    in = Simulink.SimulationInput(mdl);
+    in = in.setVariable('K', K_list(i));             % SAME K in torque, back-EMF, and feedforward Va = K*omega_cmd
+    in = in.setModelParameter('StopTime', stopTime);
+    S{i} = sim(in);
+end
+
+% -------- Plot ONLY rotor speed on same axes ----------
+figure('Color','w','Name','HW2 Q(f): rotor speed \omega(t)');
+hold on; grid on; box on;
+for i = 1:numel(K_list)
+    plot(S{i}.tout, S{i}.w.Data, 'LineWidth', 2.1, 'Color', col(i,:));
+end
+xline(0.05,'k--','t = 0.05 s (T_L step)','LabelVerticalAlignment','bottom');
+xlabel('Time  t  [s]'); ylabel('\omega  [rad/s]');
+title('f) Open-loop rotor speed: step \omega_{cmd}=100 rad/s, T_L step at 0.05 s');
+legend(lab,'Location','best');
+xlim([0 0.1]);
+
+% -------- Numbers the grader wants (steady-state before 0.05 s, and near 0.1 s) ----------
+avg_win = @(t,y,t0,dt) mean( y(t>=t0-dt/2 & t<=t0+dt/2) );
+dt_pre  = 2e-3;     % 2 ms window just before 0.05 s
+dt_post = 5e-3;     % 5 ms window near 0.1 s
+
+% Theory with "crummy control" Va = K*omega_cmd, B=0:
+%   w_ss = Va/K - (R*T_L)/K^2 = 100 - (R*T_L)/K^2
+w_ss_theory = @(K,TL) 100 - (R*TL)./(K.^2);
+
+fprintf('\n=== HW2 Q(f): rotor speed steady-state values ===\n');
+for i = 1:numel(K_list)
+    Kval = K_list(i);
+    t = S{i}.tout;  w = S{i}.w.Data;
+
+    w_pre_sim  = avg_win(t, w, 0.049, dt_pre);     % just before 0.05 s
+    w_post_sim = avg_win(t, w, 0.099, dt_post);    % near 0.1 s
+
+    w_pre_th   = w_ss_theory(Kval, 0.0);
+    w_post_th  = w_ss_theory(Kval, Tl_final);
+
+    fprintf('%s\n', lab(i));
+    fprintf('  w_ss (theory) @ t<0.05 s:  %8.3f rad/s | sim: %8.3f\n', w_pre_th,  w_pre_sim);
+    fprintf('  w_ss (theory) @ t=0.10 s:  %8.3f rad/s | sim: %8.3f\n\n', w_post_th, w_post_sim);
+end
+
+% -------- Quick tie-back to poles/damping (part f-i) ----------
+for i = 1:numel(K_list)
+    Kval = K_list(i);
+    a1 = R/L + B/Jm;
+    a0 = (R*B)/(L*Jm) + (Kval^2)/(L*Jm);
+    wn = sqrt(a0);
+    zeta = a1/(2*wn);
+    cls = 'Underdamped'; if zeta>1, cls='Overdamped'; end; if abs(zeta-1)<1e-3, cls='Critically damped'; end
+    fprintf('%s:  wn = %.1f rad/s,  zeta = %.3f  ->  %s (matches observed response)\n', ...
+        lab(i), wn, zeta, cls);
+end
+fprintf('\nNote: With K=100%% the response is overdamped (no ringing); with K=300%% it is underdamped (oscillatory),\n');
+fprintf('consistent with the pole locations from part (d/e).\n');
+%% ================= HW2 g-i(1): Closed-loop current step (K = 100%) =================
+
+
+ia_cmd_amp = 1;                  % 1 A step
+simTime    = '0.2';              % run for 0.1 s
+
+mdl = 'g_closed_loop_current_simulation';
+
+% Run the model (controller must use Kpa, Kia, K and generate out.Ia_cmd/out.Ia)
+in = Simulink.SimulationInput(mdl);
+in = in.setVariable('K', K);
+in = in.setVariable('Kpa', Kpa);
+in = in.setVariable('Kia', Kia);
+in = in.setVariable('ia_cmd_amp', ia_cmd_amp);  % if your model reads this; otherwise ignore
+in = in.setModelParameter('StopTime', simTime);
+
+Sg = sim(in);
+
+% Pull logged signals
+t     = Sg.tout;                 % time vector
+ia    = Sg.Ia.Data;              % measured armature current  [A]
+iaref = Sg.Ia_cmd.Data;          % commanded current          [A]
+
+% -------- Plot --------
+figure('Color','w','Name','g-i(1) Current loop step');
+hold on; grid on; box on;
+plot(t, iaref, 'k--', 'LineWidth', 1.6, 'DisplayName','i_a^* (1 A cmd)');
+plot(t, ia,    'b',  'LineWidth', 2.0, 'DisplayName','i_a (measured)');
+xlabel('Time  t  [s]');
+ylabel('Armature current  i_a  [A]');
+title(sprintf('g)i)(1)Closed-loop current response', K, Kpa, Kia));
+legend('Location','best');
+xlim([0 str2double(simTime)]);
+
+% -------- Quick step metrics (nice for report) --------
+try
+    % Use the final command value as reference for stepinfo
+    yfinal = iaref(end);
+    info = stepinfo(ia, t, yfinal, 'RiseTimeLimits',[0.1 0.9], 'SettlingTimeThreshold',0.02);
+    OS  = 100*(max(ia)-yfinal)/max(1e-9,abs(yfinal));
+    fprintf('\n[g-i] Current-loop metrics:\n');
+    fprintf('  Rise time (10–90%%): %.4f s\n', info.RiseTime);
+    fprintf('  Settling time (±2%%): %.4f s\n', info.SettlingTime);
+    fprintf('  Overshoot: %.2f %%\n\n', OS);
+catch
+    % stepinfo is optional; if it fails (e.g., no Control System Toolbox), skip
+end
