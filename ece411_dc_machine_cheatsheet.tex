@@ -1,0 +1,95 @@
+
+\documentclass[11pt]{article}
+\usepackage[letterpaper,margin=0.7in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{multicol}
+\usepackage{siunitx}
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{}{0pt}{}
+\setlength{\parskip}{0.3em}
+\setlength{\parindent}{0pt}
+\begin{document}
+\begin{center}
+{\LARGE \textbf{ECE 411 — DC Machine \& Control Systems Cheat Sheet}}\\[2mm]
+\small (Ke = Kt in SI units; viscous friction $B\approx0$ unless noted)
+\end{center}
+
+\section{Electrical Model}
+\begin{align*}
+V_a &= R_a I_a + L_a \frac{d I_a}{dt} + e, \qquad
+e = K_e\,\omega_m
+\end{align*}
+
+\section{Mechanical Model}
+\begin{align*}
+J_m \frac{d\omega_m}{dt} &= T_e - T_L, \qquad
+T_e = K_t I_a
+\end{align*}
+
+\section{Time Constants}
+\begin{align*}
+\tau_a = \frac{L_a}{R_a}, \qquad
+\tau_m = \frac{J_m R_a}{K_t^2}
+\end{align*}
+
+\section{Characteristic Equation (open-loop speed)}
+\begin{align*}
+p^2 + \frac{1}{\tau_a}p + \frac{1}{\tau_a \tau_m} = 0
+\end{align*}
+
+\section{Natural Frequency \& Damping}
+\begin{align*}
+\omega_n = \frac{1}{\sqrt{\tau_a \tau_m}}, \qquad
+\zeta = \frac{1}{2}\sqrt{\frac{\tau_m}{\tau_a}}
+\end{align*}
+
+\section{Eigenvalues}
+\begin{align*}
+p_{1,2} = -\frac{1}{2\tau_a} \pm \sqrt{\left(\frac{1}{2\tau_a}\right)^2 - \frac{1}{\tau_a\tau_m}}
+\end{align*}
+
+\section{Minimum Inertia for Real Roots}
+Real roots require discriminant $\ge 0 \Rightarrow \tau_m \ge 4 \tau_a$ :
+\begin{align*}
+J_{m,\min} = \frac{4 L_a K_t^2}{R_a^2}
+\end{align*}
+
+\section{Performance Metrics (2\% criterion)}
+\begin{align*}
+\mathrm{ST} &= \frac{4}{\omega_n \zeta}, \qquad
+\mathrm{OS} = 100\,e^{-\zeta \pi/\sqrt{1-\zeta^2}}\% \\
+x(t) &= X e^{pt}
+\end{align*}
+
+\section{Impedance Analogy (Electrical $\leftrightarrow$ Rotational Mechanical)}
+\begin{center}
+$V \!\leftrightarrow\! T,\quad I \!\leftrightarrow\! \omega,\quad R \!\leftrightarrow\! B,\quad L \!\leftrightarrow\! J,\quad C \!\leftrightarrow\! 1/B$
+\end{center}
+
+\section{Variable \& Unit Quick Reference}
+\begin{multicols}{2}
+\begin{tabular}{ll}
+$V_a$ & Armature voltage [V] \\
+$I_a$ & Armature current [A] \\
+$R_a$ & Armature resistance [\si{\ohm}]\\
+$L_a$ & Armature inductance [H] \\
+$e$   & Back-EMF [V] \\
+$K_t$ & Torque constant [N\,m/A] \\
+$K_e$ & Voltage constant [V\,s/rad] \\
+\end{tabular}
+
+\columnbreak
+
+\begin{tabular}{ll}
+$T_e$ & Electromagnetic torque [N\,m] \\
+$J_m$ & Inertia [kg\,m$^2$] \\
+$\omega_m$ & Angular speed [rad/s] \\
+$\tau_a,\tau_m$ & Time constants [s] \\
+$\zeta$ & Damping ratio [–] \\
+$\omega_n$ & Natural frequency [rad/s] \\
+$p$ & Laplace variable [s$^{-1}$] \\
+\end{tabular}
+\end{multicols}
+
+\end{document}
