@@ -456,4 +456,4 @@ def update_salient_tab(ld, lq, e0, v0, w_e):
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run(debug=True)
