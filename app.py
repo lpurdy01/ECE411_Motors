@@ -28,15 +28,89 @@ APP_TITLE = "ECE 411 Motor Visualization"
 TIME_VECTOR = np.linspace(0.0, 4.0 / 60.0, 600)
 DELTA_RANGE = np.linspace(-math.pi, math.pi, 400)
 
+CHEAT_SHEET_MARKDOWN = textwrap.dedent(
+    r"""
+    ### Frames & Conventions
+    * q-axis aligns with α when $\theta_e = 0$; the d-axis trails q by 90° (clockwise).
+    * Electrical angle $\theta_e$ rotates α→q counter-clockwise; $\omega_e = d\theta_e/dt$.
+    * For plotting, q = Real{·}, d = −Imag{·}; β = −Imag{αβ}.
 
-def _phasor_trace(name: str, value: complex, color: str) -> go.Scatter:
+    ### Clarke & Park Transforms
+    $\begin{aligned}
+    \alpha &= \tfrac{2}{3}\left(V_a - \tfrac{1}{2}V_b - \tfrac{1}{2}V_c\right) \\
+    \beta &= \tfrac{2}{3}\left(\tfrac{\sqrt{3}}{2}\right)(V_c - V_b)
+    \end{aligned}$
+
+    $\begin{aligned}
+    v_q &= \alpha \cos\theta_e - \beta \sin\theta_e \\
+    v_d &= \alpha \sin\theta_e + \beta \cos\theta_e
+    \end{aligned}$
+
+    Inverse Park:
+    $\alpha = v_q \cos\theta_e + v_d \sin\theta_e$, $\beta = -v_q \sin\theta_e + v_d \cos\theta_e$.
+
+    ### Phasors & Flux Linkage
+    * Rotating operator $a = e^{j2\pi/3}$ and $x_{\alpha\beta} = \tfrac{2}{3}(x_a + a x_b + a^2 x_c)$.
+    * Park phasor: $x_{qd} = x_{\alpha\beta} e^{-j\theta_e}$; $q = \Re\{x_{qd}\}$, $d = -\Im\{x_{qd}\}$.
+    * Internal EMF and flux are linked through $E_0 = \omega_e \Lambda_0 \Rightarrow \Lambda_0 = E_0/\omega_e$.
+
+    ### Voltage Equations
+    Round rotor:
+    $\begin{aligned}
+    V_q &= R_s I_q + \omega_e L_s I_d + E_q \\
+    V_d &= R_s I_d - \omega_e L_s I_q + E_d
+    \end{aligned}$
+
+    Salient pole:
+    $\begin{aligned}
+    V_q &= R_s I_q + \omega_e L_d I_d + E_q \\
+    V_d &= R_s I_d - \omega_e L_q I_q + E_d
+    \end{aligned}$
+
+    ### Torque & Power
+    $P = \tfrac{3}{2}(V_q I_q + V_d I_d)$, \quad $T_e = P/\omega_e$.
+
+    Salient-pole torque split:
+    $\begin{aligned}
+    T_{\text{field}} &= -\frac{E_0 V_0}{\omega_e L_d} \sin\delta \\
+    T_{\text{rel}} &= -\frac{V_0^2 (L_d - L_q)}{2\omega_e L_d L_q} \sin(2\delta)
+    \end{aligned}$
+
+    ### Field-Weakening Essentials
+    * Voltage limit ($R_s = 0$): $V_0^2 = (\omega_e \Lambda_0)^2 - (\omega_e L_s I_0)^2$.
+    * Required flux: $\Lambda_0 = \sqrt{(V_0/\omega_e)^2 + (L_s I_0)^2}$.
+    * Constant-power region: $T_{\max} = V_0 I_0 / \omega_e$, $P_{\max} = V_0 I_0$.
+
+    ### Quick Reference
+    * Open circuit → $v_q \approx \omega_e \Lambda_0$, $v_d \approx 0$.
+    * Motoring torque is positive when electrical power is absorbed.
+    * $\delta$ grows with load torque; small $\delta$ keeps machine near linear response.
+    """
+)
+
+
+def _phasor_trace(
+    name: str,
+    value: complex,
+    color: str,
+    *,
+    text: str | None = None,
+    hovertemplate: str | None = None,
+) -> go.Scatter:
+    mode = "lines+markers"
+    if text is not None:
+        mode += "+text"
+
     return go.Scatter(
         x=[0, value.real],
         y=[0, value.imag],
-        mode="lines+markers",
+        mode=mode,
         name=name,
         line=dict(color=color, width=4),
         marker=dict(color=color, size=8),
+        text=[None, text] if text is not None else None,
+        textposition="top center" if text is not None else None,
+        hovertemplate=hovertemplate,
     )
 
 
@@ -48,6 +122,53 @@ def _phasor_layout(title: str) -> go.Layout:
         showlegend=True,
         height=450,
     )
+
+
+def _angle_arc_traces(
+    start_angle: float,
+    end_angle: float,
+    radius: float,
+    *,
+    color: str,
+    label: str,
+) -> list[go.Scatter]:
+    """Return Plotly traces that render an annotated angle arc."""
+
+    delta = end_angle - start_angle
+    if abs(delta) < 1e-6:
+        return []
+
+    # Draw the shorter arc direction for clarity.
+    if delta > math.pi:
+        end_angle -= 2.0 * math.pi
+    elif delta < -math.pi:
+        end_angle += 2.0 * math.pi
+
+    angles = np.linspace(start_angle, end_angle, 60)
+    x = radius * np.cos(angles)
+    y = radius * np.sin(angles)
+
+    arc = go.Scatter(
+        x=x,
+        y=y,
+        mode="lines",
+        line=dict(color=color, dash="dot"),
+        hoverinfo="skip",
+        showlegend=False,
+    )
+
+    midpoint = angles[len(angles) // 2]
+    label_trace = go.Scatter(
+        x=[radius * 1.15 * math.cos(midpoint)],
+        y=[radius * 1.15 * math.sin(midpoint)],
+        mode="text",
+        text=[label],
+        textfont=dict(color=color, size=14),
+        hoverinfo="skip",
+        showlegend=False,
+    )
+
+    return [arc, label_trace]
 
 
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
@@ -281,6 +402,21 @@ app.layout = html.Div(
                         className="tab-layout",
                     )
                 ]),
+                dcc.Tab(label="Cheat Sheet", value="tab-cheatsheet", children=[
+                    html.Div(
+                        dcc.Markdown(
+                            CHEAT_SHEET_MARKDOWN,
+                            mathjax=True,
+                            style={
+                                "backgroundColor": "#f8f9fa",
+                                "padding": "1.5rem",
+                                "borderRadius": "8px",
+                                "lineHeight": "1.6",
+                            },
+                        ),
+                        style={"maxWidth": "900px", "margin": "1.5rem auto"},
+                    )
+                ]),
             ],
         ),
     ],
@@ -400,13 +536,95 @@ def update_round_tab(rs, ls, v0, e0, w_e, delta_deg):
     drops_r = op["voltage_drop_res"]
     drops_l = op["voltage_drop_sync"]
 
+    def _phasor_metrics(value: complex) -> tuple[float, float, float]:
+        magnitude = abs(value)
+        angle_rad = math.atan2(value.imag, value.real)
+        angle_deg = math.degrees(angle_rad)
+        return magnitude, angle_deg, angle_rad
+
     fig = go.Figure()
-    fig.add_trace(_phasor_trace("Terminal V", voltage, "#1f77b4"))
-    fig.add_trace(_phasor_trace("Internal E", emf, "#ff7f0e"))
-    fig.add_trace(_phasor_trace("Stator I", current, "#2ca02c"))
-    fig.add_trace(_phasor_trace("Rₛ I", drops_r, "#d62728"))
-    fig.add_trace(_phasor_trace("jωLₛ I", drops_l, "#9467bd"))
+
+    phasor_defs = [
+        ("Terminal V", voltage, "#1f77b4", "|V|"),
+        ("Internal E", emf, "#ff7f0e", "|E|"),
+        ("Stator I", current, "#2ca02c", "|I|"),
+        ("Rₛ I", drops_r, "#d62728", "|Rₛ I|"),
+        ("jωLₛ I", drops_l, "#9467bd", "|jωLₛ I|"),
+    ]
+
+    max_magnitude = 0.0
+    angles_rad: dict[str, float] = {}
+
+    for name, value, color, label in phasor_defs:
+        magnitude, angle_deg, angle_rad = _phasor_metrics(value)
+        max_magnitude = max(max_magnitude, magnitude)
+        angles_rad[name] = angle_rad
+        fig.add_trace(
+            _phasor_trace(
+                name,
+                value,
+                color,
+                text=f"{label}={magnitude:.3f} pu",
+                hovertemplate=(
+                    f"{name}<br>{label} = {magnitude:.3f} pu"
+                    + f"<br>∠ = {angle_deg:.1f}°<extra></extra>"
+                ),
+            )
+        )
+
+    lambda_trace_added = False
+    flux_summary = "Λ₀ undefined when ωₑ = 0"
+    if params.w_e != 0:
+        flux_magnitude = abs(emf) / params.w_e
+        flux_angle = math.atan2(emf.imag, emf.real)
+        flux_vector = flux_magnitude * math.cos(flux_angle) + 1j * flux_magnitude * math.sin(flux_angle)
+        max_magnitude = max(max_magnitude, flux_magnitude)
+        angles_rad["Flux Λ₀"] = flux_angle
+        fig.add_trace(
+            _phasor_trace(
+                "Flux Λ₀",
+                flux_vector,
+                "#17becf",
+                text=f"|Λ|={flux_magnitude:.3f} pu",
+                hovertemplate=(
+                    "Flux Λ₀"
+                    + f"<br>|Λ| = {flux_magnitude:.3f} pu"
+                    + f"<br>∠ = {math.degrees(flux_angle):.1f}°<extra></extra>"
+                ),
+            )
+        )
+        lambda_trace_added = True
+        flux_summary = (
+            "$\\Lambda_0 = \\frac{E_0}{\\omega_e} = "
+            f"\\frac{{{abs(emf):.3f}}}{{{params.w_e:.3f}}} = {abs(emf)/params.w_e:.3f}$"
+        )
+
     fig.update_layout(_phasor_layout("qd-Plane Phasors"))
+
+    if max_magnitude > 1e-6:
+        radius = max_magnitude * 0.45
+        for trace in _angle_arc_traces(
+            angles_rad.get("Terminal V", 0.0),
+            angles_rad.get("Internal E", 0.0),
+            radius,
+            color="#ff7f0e",
+            label="δ",
+        ):
+            fig.add_trace(trace)
+
+        for trace in _angle_arc_traces(
+            angles_rad.get("Terminal V", 0.0),
+            angles_rad.get("Stator I", 0.0),
+            radius * 0.8,
+            color="#2ca02c",
+            label="θ",
+        ):
+            fig.add_trace(trace)
+
+    fig.update_layout(
+        legend=dict(bgcolor="rgba(255,255,255,0.8)", bordercolor="#cccccc", borderwidth=1),
+        margin=dict(l=40, r=20, t=60, b=40),
+    )
 
     summary = textwrap.dedent(
         fr"""
@@ -419,8 +637,9 @@ def update_round_tab(rs, ls, v0, e0, w_e, delta_deg):
         T_e &= \frac{{P}}{{\omega_e}} = \frac{{{op['power']:.3f}}}{{{w_e:.3f}}} = {op['torque']:.3f}
         \end{{aligned}}$$
 
-        Power factor $\cos\varphi = {op['pf']:.3f}$ (ϕ = {math.degrees(op['pf_angle']):.1f}°)  
+        Power factor $\cos\varphi = {op['pf']:.3f}$ (ϕ = {math.degrees(op['pf_angle']):.1f}°)
         $|I| = {op['i_mag']:.3f}$ pu
+        {flux_summary}
         """
     ).strip()
 
