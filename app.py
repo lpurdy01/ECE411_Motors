@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import math
+import os
 import textwrap
 
 import numpy as np
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, dcc, html
+from flask import abort, request
 
 from motor_models import (
     FieldWeakeningParams,
@@ -48,8 +50,18 @@ def _phasor_layout(title: str) -> go.Layout:
     )
 
 
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+
 app = Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
+
+if ACCESS_TOKEN:
+
+    @server.before_request
+    def _check_token() -> None:
+        token = request.args.get("token")
+        if token != ACCESS_TOKEN:
+            abort(403)
 
 app.layout = html.Div(
     [
