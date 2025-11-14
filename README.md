@@ -24,6 +24,12 @@ and salient-pole torque contributions.
 
    The server defaults to `http://127.0.0.1:8050/`.
 
+## Usage
+
+Visit the locally running app at the address above, or the deployed service at
+`https://<service>.onrender.com` (append `?token=YOURTOKEN` if you've set
+`ACCESS_TOKEN`).
+
 ## Running tests
 
 All unit and integration tests use `pytest` and `dash[testing]`:
@@ -54,3 +60,22 @@ tests/                # Unit + integration tests
 
 Historical MATLAB scripts and reference material from the original coursework
 are still included for reference under the existing directories.
+
+## Deployment via Render
+
+This app is deployed automatically on commit to `main` branch.
+
+1. On Render.com, create a new **Web Service**:
+   - Link your GitHub repo.
+   - Select branch `main`.
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `gunicorn app:server`
+
+2. In Render service settings → Environment Variables:
+   - Add `ACCESS_TOKEN` (optional) with your secret value if you want token access.
+
+3. Ensure auto-deploy is set to **On Commit** (default) so that every merge to `main` triggers a new deploy.  
+   See Render docs on auto-deploy. :contentReference[oaicite:1]{index=1}
+
+4. You will get a service URL like `https://<name>.onrender.com`.  
+   Share this URL (plus `?token=…` if using token) with class members.
