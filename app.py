@@ -57,8 +57,14 @@ server = app.server
 
 if ACCESS_TOKEN:
 
+    _PUBLIC_PATH_PREFIXES = ("/_dash-", "/assets/")
+    _PUBLIC_PATHS = {"/_favicon.ico", "/favicon.ico"}
+
     @server.before_request
     def _check_token() -> None:
+        if request.path in _PUBLIC_PATHS or request.path.startswith(_PUBLIC_PATH_PREFIXES):
+            return None
+
         token = request.args.get("token")
         if token != ACCESS_TOKEN:
             abort(403)
