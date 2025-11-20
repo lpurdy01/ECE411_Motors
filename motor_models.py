@@ -407,7 +407,7 @@ def inverter_voltage_vs_speed(
     r"""Voltage requirement sweep vs mechanical speed for multiple ``I_f``.
 
     Replicates MATLAB Part 1 by holding ``Iq = I0_max`` and ``Id = 0`` while
-    evaluating :math:`V_0 = |E_q + (R_s + j\omega_e L_s) I_qd|`.
+    evaluating :math:`V_0 = |E_q + (R_s + j\\omega_e L_s) I_qd|`.
     """
 
     v0_lim = params.Vdc / math.sqrt(3.0)

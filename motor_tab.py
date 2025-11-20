@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import math
+import time
 import zipfile
 from dataclasses import asdict
 
@@ -27,6 +29,10 @@ from motor_models import (
 DEFAULT_MACHINE = default_machine_params()
 DEFAULT_BASES = pu_bases_from_machine(DEFAULT_MACHINE)
 THREE_D_SENTINEL = "__3d__"
+MAX_SPEED_SAMPLES = 240
+MAX_TORQUE_SAMPLES = 200
+SURFACE_POINTS = 80
+LOG = logging.getLogger(__name__)
 
 
 def _parse_field_currents(raw: str, fallback: list[float]) -> list[float]:
@@ -91,11 +97,11 @@ def build_motor_tab() -> html.Div:
             ),
             _input_cell(
                 "Speed samples",
-                dcc.Input(id="motor-speed-samples", type="number", min=60, max=400, step=10, value=220),
+                dcc.Input(id="motor-speed-samples", type="number", min=40, max=240, step=10, value=140),
             ),
             _input_cell(
                 "Torque samples",
-                dcc.Input(id="motor-torque-samples", type="number", min=60, max=300, step=10, value=180),
+                dcc.Input(id="motor-torque-samples", type="number", min=40, max=200, step=10, value=100),
             ),
         ],
         style={"borderCollapse": "separate", "borderSpacing": "0.4rem 0.35rem", "width": "100%"},
@@ -197,6 +203,7 @@ def build_motor_tab() -> html.Div:
     State("motor-torque-max", "value"),
     State("motor-speed-samples", "value"),
     State("motor-torque-samples", "value"),
+    prevent_initial_call=True,
 )
 def compute_motor_maps(
     n_clicks,
@@ -217,6 +224,7 @@ def compute_motor_maps(
     torque_samples,
 ):
     del n_clicks  # unused for values
+    start = time.perf_counter()
 
     params = MachineParams(
         Lm=lm,
@@ -231,18 +239,35 @@ def compute_motor_maps(
         If_max=if_max,
     )
     bases = pu_bases_from_machine(params)
+    speed_max = float(speed_max or 3 * params.wmb)
+    torque_max = float(torque_max or bases.TB * 1.5)
+
+    speed_samples = int(speed_samples or 0)
+    torque_samples = int(torque_samples or 0)
+    speed_samples = min(MAX_SPEED_SAMPLES, max(40, speed_samples))
+    torque_samples = min(MAX_TORQUE_SAMPLES, max(40, torque_samples))
 
     auto_config = "auto" in (auto_flags or [])
     if auto_config:
         speed_max = 3 * params.wmb
         torque_max = max(params.I0_max * bases.TB / bases.IB, bases.TB * 1.5)
 
-    omega_m = np.linspace(0.0, speed_max, int(speed_samples))
-    torque_axis = np.linspace(0.0, torque_max, int(torque_samples))
+    omega_m = np.linspace(0.0, speed_max, speed_samples)
+    torque_axis = np.linspace(0.0, torque_max, torque_samples)
 
     field_currents = _parse_field_currents(field_current_text or "", [if_max])
     options = ([{"label": "3D surfaces (all I_f)", "value": THREE_D_SENTINEL}] +
                [{"label": f"{val:.3f} A", "value": val} for val in field_currents])
+
+    LOG.info(
+        "Motor calc start: Vdc=%.1f, poles=%s, field_cases=%s, grid=%sx%s, auto=%s",
+        vdc,
+        poles,
+        field_currents,
+        speed_samples,
+        torque_samples,
+        auto_config,
+    )
 
     voltage_sweep = inverter_voltage_vs_speed(params, bases, field_currents, omega_m)
 
@@ -277,6 +302,16 @@ def compute_motor_maps(
         "per_if": per_if_maps,
     }
 
+    payload_size = len(json.dumps(payload))
+    duration = time.perf_counter() - start
+    LOG.info(
+        "Motor calc finished in %.2fs (%.1f kB, ω_max=%.1f rad/s, T_max=%.1f N·m)",
+        duration,
+        payload_size / 1024,
+        speed_max,
+        torque_max,
+    )
+
     status = html.Span(
         [
             html.Strong("Motor calculator ready • "),
@@ -299,6 +334,17 @@ def _headroom_from_mod_map(mod_map: dict) -> np.ndarray:
     headroom = np.where(feasible_mask, headroom, np.nan)
     headroom = np.clip(headroom, 0, 5)
     return headroom
+
+
+def _decimate_surface_arrays(x_grid: np.ndarray, y_grid: np.ndarray, z_grid: np.ndarray, metric: np.ndarray):
+    row_step = max(1, math.ceil(metric.shape[0] / SURFACE_POINTS))
+    col_step = max(1, math.ceil(metric.shape[1] / SURFACE_POINTS))
+    return (
+        x_grid[::row_step, ::col_step],
+        y_grid[::row_step, ::col_step],
+        z_grid[::row_step, ::col_step],
+        metric[::row_step, ::col_step],
+    )
 
 
 @callback(
@@ -382,12 +428,16 @@ def update_motor_plots(selected_if, data):
                 cmin = float(finite_metric.min()) if finite_metric.size else 0.0
                 cmax = float(finite_metric.max()) if finite_metric.size else 1.0
 
+                omega_ds, y_ds, torque_ds, metric_ds = _decimate_surface_arrays(
+                    omega_grid, y_grid, torque_grid, metric
+                )
+
                 fig.add_trace(
                     go.Surface(
-                        x=omega_grid,
-                        y=y_grid,
-                        z=torque_grid,
-                        surfacecolor=metric,
+                        x=omega_ds,
+                        y=y_ds,
+                        z=torque_ds,
+                        surfacecolor=metric_ds,
                         colorscale=colorscale,
                         cmin=cmin,
                         cmax=cmax,
@@ -502,6 +552,7 @@ def update_motor_plots(selected_if, data):
     )
 
     headroom = _headroom_from_mod_map(maps["modulation"])
+    headroom_max = float(np.nanmax(headroom)) if np.isfinite(headroom).any() else 1.0
     headroom_fig = go.Figure(
         go.Contour(
             x=mod_map["omega_m"][0, :],
@@ -510,6 +561,8 @@ def update_motor_plots(selected_if, data):
             colorscale="Cividis",
             colorbar=dict(title="Headroom (× limit)"),
             contours=dict(showlabels=True),
+            zmin=0,
+            zmax=headroom_max,
         )
     )
     headroom_fig.add_trace(

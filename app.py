@@ -1,9 +1,11 @@
 """Dash application for visualizing ECE 411 synchronous machine concepts."""
 from __future__ import annotations
 
+import logging
 import math
 import os
 import textwrap
+import sys
 
 import numpy as np
 import plotly.graph_objects as go
@@ -26,6 +28,25 @@ from motor_models import (
     sm_required_voltage_park_pu,
 )
 from motor_tab import build_motor_tab
+
+
+def configure_logging() -> None:
+    """Initialize structured logging suitable for Render and local runs."""
+
+    level_name = os.getenv("APP_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    handler.setFormatter(formatter)
+
+    logging.basicConfig(level=level, handlers=[handler], force=True)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+configure_logging()
+LOG = logging.getLogger(__name__)
 
 APP_TITLE = "ECE 411 Motor Visualization"
 TIME_VECTOR = np.linspace(0.0, 4.0 / 60.0, 600)
