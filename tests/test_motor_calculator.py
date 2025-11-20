@@ -1,11 +1,13 @@
 import math
 
+import math
 import numpy as np
 
 from motor_models import (
     default_machine_params,
     inverter_voltage_vs_speed,
     mechanical_power_map,
+    modulation_index_map,
     pu_bases_from_machine,
     sm_required_voltage_park,
     sm_required_voltage_park_pu,
@@ -63,3 +65,18 @@ def test_power_map_masks_infeasible_points():
     power_map = mechanical_power_map(params.If_max, torque_axis, omega_axis, params, bases)
     # At zero speed (first column), any nonzero torque should be infeasible
     assert not power_map["feasible_mask"][1:, 0].any()
+
+
+def test_modulation_map_clips_to_feasible_region():
+    params = default_machine_params()
+    bases = pu_bases_from_machine(params)
+    torque_axis = np.linspace(0.0, 250.0, 10)
+    omega_axis = np.linspace(0.0, 200.0, 10)
+
+    mod_map = modulation_index_map(params.If_max, torque_axis, omega_axis, params, bases)
+    # Regions violating voltage should be masked in m0_masked
+    assert np.isnan(mod_map["m0_masked"][0, -1]) or mod_map["voltage_mask"][0, -1]
+
+    # Pick a small but nonzero operating point to avoid the ω_e = 0 singularity
+    feasible_point = mod_map["m0_masked"][1, 1]
+    assert np.isfinite(feasible_point)

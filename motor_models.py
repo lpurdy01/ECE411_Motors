@@ -485,7 +485,12 @@ def modulation_index_map(
     params: MachineParams,
     bases: PUBases,
 ) -> dict:
-    """Compute modulation index contours ``M0 = 2/√3 · V0_pu`` for Part 3."""
+    """Compute modulation index contours ``M0 = 2/√3 · V0_pu`` for Part 3.
+
+    Values outside the simultaneous voltage/current limits are set to NaN so
+    contour plots clip to the feasible region. Returned mask and headroom
+    arrays allow the UI to render constraint overlays without recomputing.
+    """
 
     omega_m_grid, torque_grid = np.meshgrid(omega_m_values, torque_values)
     omega_e_grid = (params.p / 2.0) * omega_m_grid
@@ -500,8 +505,27 @@ def modulation_index_map(
     v_pu = sm_required_voltage_park_pu(omega_m_grid, field_current, iq_pu * bases.IB, 0.0, params, bases)
     v0_pu = np.reshape(v_pu["V0_pu"], omega_m_grid.shape)
     m0 = (2.0 / math.sqrt(3.0)) * v0_pu
+    i_mag_pu = np.abs(iq_pu)
+    current_ratio = i_mag_pu / (params.I0_max / bases.IB)
+    voltage_ratio = v0_pu / (params.Vdc / math.sqrt(3.0) / bases.VB)
 
-    return {"omega_m": omega_m_grid, "torque": torque_grid, "m0": m0}
+    current_mask = i_mag_pu <= (params.I0_max / bases.IB)
+    voltage_mask = v0_pu <= (params.Vdc / math.sqrt(3.0) / bases.VB)
+    feasible_mask = current_mask & voltage_mask & np.isfinite(iq_pu)
+
+    m0_masked = np.where(feasible_mask, m0, np.nan)
+
+    return {
+        "omega_m": omega_m_grid,
+        "torque": torque_grid,
+        "m0": m0,
+        "m0_masked": m0_masked,
+        "current_mask": current_mask,
+        "voltage_mask": voltage_mask,
+        "feasible_mask": feasible_mask,
+        "current_ratio": current_ratio,
+        "voltage_ratio": voltage_ratio,
+    }
 
 
 def loss_curves(params: MachineParams) -> dict:

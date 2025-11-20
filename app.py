@@ -457,36 +457,58 @@ app.layout = html.Div(
                                     dcc.Input(id="motor-field-currents", type="text", value="7.0,4.666,2.333"),
                                     html.Br(),
                                     html.Label("Plot ranges"),
-                                    dcc.Slider(id="motor-speed-max", min=200, max=1600, step=50, value=3 * DEFAULT_MACHINE.wmb, marks=None, tooltip={"placement": "bottom"}),
+                                    dcc.Slider(
+                                        id="motor-speed-max",
+                                        min=200,
+                                        max=1600,
+                                        step=50,
+                                        value=3 * DEFAULT_MACHINE.wmb,
+                                        marks=None,
+                                        tooltip={"placement": "bottom"},
+                                    ),
                                     html.Div("Max mechanical speed ω_m (rad/s)", style={"marginBottom": "0.5rem"}),
-                                    dcc.Slider(id="motor-torque-max", min=50, max=260, step=10, value=230, marks=None, tooltip={"placement": "bottom"}),
+                                    dcc.Slider(
+                                        id="motor-torque-max",
+                                        min=50,
+                                        max=260,
+                                        step=10,
+                                        value=230,
+                                        marks=None,
+                                        tooltip={"placement": "bottom"},
+                                    ),
                                     html.Div("Max electromagnetic torque Tₑ (N·m)", style={"marginBottom": "0.5rem"}),
                                 ],
                                 className="tab-controls",
                             ),
                             html.Div(
                                 [
-                                    html.Div(
-                                        [
-                                            html.Div(
-                                                [
-                                                    html.Label("Select I_f for contour plots"),
-                                                    dcc.Dropdown(id="motor-selected-if", clearable=False),
-                                                ],
-                                                style={"marginBottom": "0.5rem"},
-                                            ),
-                                            dcc.Graph(id="motor-v0-graph"),
-                                            dcc.Graph(id="motor-power-contour"),
-                                            dcc.Graph(id="motor-modulation-contour"),
-                                            dcc.Graph(id="motor-loss-graph"),
-                                            dcc.Graph(id="motor-loss-contour"),
-                                            dcc.Markdown(
-                                                id="motor-summary",
-                                                mathjax=True,
-                                                style={"backgroundColor": "#f8f9fa", "padding": "0.75rem"},
-                                            ),
-                                        ]
-                                    ),
+                                    dcc.Loading(
+                                        html.Div(
+                                            [
+                                                html.Div(
+                                                    [
+                                                        html.Label("Select I_f for contour plots"),
+                                                        dcc.Dropdown(id="motor-selected-if", clearable=False),
+                                                    ],
+                                                    style={"marginBottom": "0.5rem"},
+                                                ),
+                                                dcc.Graph(id="motor-v0-graph"),
+                                                dcc.Graph(id="motor-power-contour"),
+                                                dcc.Graph(id="motor-modulation-contour"),
+                                                dcc.Graph(id="motor-headroom"),
+                                                dcc.Graph(id="motor-field-surfaces"),
+                                                dcc.Graph(id="motor-loss-graph"),
+                                                dcc.Graph(id="motor-loss-contour"),
+                                                dcc.Markdown(
+                                                    id="motor-summary",
+                                                    mathjax=True,
+                                                    style={"backgroundColor": "#f8f9fa", "padding": "0.75rem"},
+                                                ),
+                                            ]
+                                        ),
+                                        type="graph",
+                                        fullscreen=False,
+                                    )
                                 ],
                                 className="tab-plots",
                             ),
@@ -863,6 +885,8 @@ def update_salient_tab(ld, lq, e0, v0, w_e):
     Output("motor-v0-graph", "figure"),
     Output("motor-power-contour", "figure"),
     Output("motor-modulation-contour", "figure"),
+    Output("motor-headroom", "figure"),
+    Output("motor-field-surfaces", "figure"),
     Output("motor-loss-graph", "figure"),
     Output("motor-loss-contour", "figure"),
     Output("motor-summary", "children"),
@@ -993,7 +1017,7 @@ def update_motor_calculator(
         go.Contour(
             x=mod_map["omega_m"][0, :],
             y=mod_map["torque"][:, 0],
-            z=mod_map["m0"],
+            z=mod_map["m0_masked"],
             colorscale="Plasma",
             colorbar=dict(title="M₀"),
             contours=dict(showlabels=True),
@@ -1015,6 +1039,91 @@ def update_motor_calculator(
         xaxis_title="ωₘ (rad/s)",
         yaxis_title="Tₑ (N·m)",
     )
+
+    current_headroom = np.divide(
+        1.0,
+        mod_map["current_ratio"],
+        out=np.full_like(mod_map["current_ratio"], np.inf),
+        where=mod_map["current_ratio"] != 0,
+    )
+    voltage_headroom = np.divide(
+        1.0,
+        mod_map["voltage_ratio"],
+        out=np.full_like(mod_map["voltage_ratio"], np.inf),
+        where=mod_map["voltage_ratio"] != 0,
+    )
+    headroom = np.minimum(current_headroom, voltage_headroom)
+    headroom = np.where(mod_map["feasible_mask"], headroom, np.nan)
+    headroom_fig = go.Figure(
+        go.Contour(
+            x=mod_map["omega_m"][0, :],
+            y=mod_map["torque"][:, 0],
+            z=headroom,
+            colorscale="Cividis",
+            colorbar=dict(title="Headroom (× limit)"),
+            contours=dict(showlabels=True),
+        )
+    )
+    headroom_fig.add_trace(
+        go.Contour(
+            x=mod_map["omega_m"][0, :],
+            y=mod_map["torque"][:, 0],
+            z=mod_map["voltage_mask"].astype(float),
+            contours=dict(coloring="lines", showlines=True, start=1, end=1, size=1),
+            showscale=False,
+            line=dict(color="#d62728"),
+            name="Voltage limit",
+        )
+    )
+    headroom_fig.add_trace(
+        go.Contour(
+            x=mod_map["omega_m"][0, :],
+            y=mod_map["torque"][:, 0],
+            z=mod_map["current_mask"].astype(float),
+            contours=dict(coloring="lines", showlines=True, start=1, end=1, size=1),
+            showscale=False,
+            line=dict(color="#7f7f7f", dash="dash"),
+            name="Current limit",
+        )
+    )
+    headroom_fig.update_layout(
+        title=f"Voltage/Current Headroom | I_f = {selected_if:.3f} A",
+        xaxis_title="ωₘ (rad/s)",
+        yaxis_title="Tₑ (N·m)",
+    )
+
+    surface_torque = np.linspace(0.0, torque_max, 60)
+    surface_speed = np.linspace(0.0, speed_max, 60)
+    surface_fig = make_subplots(
+        rows=1,
+        cols=len(field_currents),
+        subplot_titles=[f"I_f = {val:.3f} A" for val in field_currents],
+        specs=[[{"type": "surface"} for _ in field_currents]],
+        horizontal_spacing=0.02,
+    )
+    for idx, if_case in enumerate(field_currents, start=1):
+        surface_map = mechanical_power_map(if_case, surface_torque, surface_speed, params, bases)
+        surface_fig.add_trace(
+            go.Surface(
+                x=surface_map["omega_m"],
+                y=surface_map["torque"],
+                z=surface_map["power_w"] / 1e3,
+                colorscale="Viridis",
+                showscale=(idx == len(field_currents)),
+                colorbar=dict(title="Pₘ (kW)") if idx == len(field_currents) else None,
+            ),
+            row=1,
+            col=idx,
+        )
+        surface_fig.update_scenes(
+            xaxis_title="ωₘ (rad/s)",
+            yaxis_title="Tₑ (N·m)",
+            zaxis_title="Pₘ (kW)",
+            zaxis=dict(range=[0, np.nanmax(surface_map["power_w"] / 1e3) if np.isfinite(surface_map["power_w"]).any() else 1]),
+            row=1,
+            col=idx,
+        )
+    surface_fig.update_layout(title="Mechanical Power Surfaces Across I_f")
 
     losses = loss_curves(params)
     loss_fig = make_subplots(rows=1, cols=3, subplot_titles=["Field I²R", "Core vs E₀", "Stator + inverter"], shared_yaxes=False)
@@ -1063,6 +1172,8 @@ def update_motor_calculator(
         v0_fig,
         power_fig,
         mod_fig,
+        headroom_fig,
+        surface_fig,
         loss_fig,
         loss_contour,
         base_summary,
