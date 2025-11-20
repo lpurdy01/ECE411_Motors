@@ -5,6 +5,7 @@ import numpy as np
 
 from motor_models import (
     default_machine_params,
+    efficiency_map,
     inverter_voltage_vs_speed,
     mechanical_power_map,
     modulation_index_map,
@@ -12,6 +13,7 @@ from motor_models import (
     sm_required_voltage_park,
     sm_required_voltage_park_pu,
 )
+from motor_tab import THREE_D_SENTINEL, _headroom_from_mod_map, compute_motor_maps
 
 
 def test_sm_required_voltage_matches_manual():
@@ -80,3 +82,52 @@ def test_modulation_map_clips_to_feasible_region():
     # Pick a small but nonzero operating point to avoid the ω_e = 0 singularity
     feasible_point = mod_map["m0_masked"][1, 1]
     assert np.isfinite(feasible_point)
+
+
+def test_efficiency_map_is_bounded_and_masked():
+    params = default_machine_params()
+    bases = pu_bases_from_machine(params)
+    torque_axis = np.linspace(0.0, 200.0, 15)
+    omega_axis = np.linspace(0.0, 300.0, 15)
+
+    eff_map = efficiency_map(params.If_max, torque_axis, omega_axis, params, bases)
+    assert np.nanmax(eff_map["efficiency"]) <= 1.0 + 1e-6
+    assert np.isnan(eff_map["efficiency"][0, 0])
+
+
+def test_headroom_helper_caps_values_and_masks():
+    mod_map = {
+        "current_ratio": np.array([[0.1, 0.0], [1.0, 2.0]]),
+        "voltage_ratio": np.array([[0.1, 0.0], [0.5, 0.2]]),
+        "feasible_mask": np.array([[True, False], [True, True]]),
+    }
+
+    headroom = _headroom_from_mod_map(mod_map)
+    assert np.nanmax(headroom) <= 5.0
+    assert np.isnan(headroom[0, 1])
+
+
+def test_compute_motor_maps_includes_surface_option():
+    params = default_machine_params()
+    payload, options, selected, *_ = compute_motor_maps(
+        0,
+        params.Vdc,
+        params.Ls,
+        params.Lm,
+        params.Rs,
+        params.Rf,
+        params.p,
+        params.wb,
+        params.I0_max,
+        params.If_max,
+        "",
+        ["auto"],
+        params.wmb,
+        200,
+        80,
+        80,
+    )
+
+    assert options[0]["value"] == THREE_D_SENTINEL
+    assert selected != THREE_D_SENTINEL
+    assert payload["per_if"]

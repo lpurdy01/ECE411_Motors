@@ -404,7 +404,7 @@ def inverter_voltage_vs_speed(
     field_currents: Iterable[float],
     omega_m: np.ndarray,
 ) -> dict:
-    """Voltage requirement sweep vs mechanical speed for multiple ``I_f``.
+    r"""Voltage requirement sweep vs mechanical speed for multiple ``I_f``.
 
     Replicates MATLAB Part 1 by holding ``Iq = I0_max`` and ``Id = 0`` while
     evaluating :math:`V_0 = |E_q + (R_s + j\omega_e L_s) I_qd|`.
@@ -598,6 +598,45 @@ def loss_surface(
     }
 
 
+def efficiency_map(
+    field_current: float,
+    torque_values: np.ndarray,
+    omega_m_values: np.ndarray,
+    params: MachineParams,
+    bases: PUBases,
+) -> dict:
+    """Compute efficiency contours for a fixed ``I_f``.
+
+    Efficiency is defined as ``η = P_mech / (P_mech + P_loss)`` and is masked
+    outside the simultaneous voltage/current feasibility region or where the
+    denominator is non-positive. Returned grids align with
+    ``mechanical_power_map`` inputs for easy reuse.
+    """
+
+    power_map = mechanical_power_map(field_current, torque_values, omega_m_values, params, bases)
+    loss_map = loss_surface(field_current, torque_values, omega_m_values, params)
+
+    p_mech = power_map["power_w"]
+    p_loss = loss_map["loss_kw"] * 1e3
+    total = p_mech + p_loss
+
+    eff = np.divide(
+        p_mech,
+        total,
+        out=np.full_like(p_mech, np.nan),
+        where=np.isfinite(total) & (total > 0),
+    )
+    feasible_mask = power_map["feasible_mask"] & loss_map["feasible_mask"]
+    eff = np.where(feasible_mask, eff, np.nan)
+
+    return {
+        "omega_m": power_map["omega_m"],
+        "torque": power_map["torque"],
+        "efficiency": eff,
+        "feasible_mask": feasible_mask,
+    }
+
+
 __all__ = [
     "MachineParams",
     "PUBases",
@@ -624,4 +663,5 @@ __all__ = [
     "modulation_index_map",
     "loss_curves",
     "loss_surface",
+    "efficiency_map",
 ]
