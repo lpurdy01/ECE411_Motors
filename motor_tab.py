@@ -438,12 +438,16 @@ def update_motor_plots(selected_if, data):
 
         def surface_fig(metric_key: str, colorscale: str, color_title: str) -> go.Figure:
             fig = go.Figure()
+
+            global_cmin: float | None = None
+            global_cmax: float | None = None
+            metric_lookup = {}
+
             for if_case in field_currents:
                 maps = _per_if_lookup(per_if, if_case)
                 if maps is None:
                     continue
-                omega_grid, torque_grid = np.meshgrid(omega_axis, torque_axis)
-                y_grid = np.full_like(omega_grid, float(if_case))
+
                 if metric_key == "power":
                     metric = np.array(maps["power"]["power_w"], dtype=float)
                 elif metric_key == "modulation":
@@ -456,12 +460,35 @@ def update_motor_plots(selected_if, data):
                     metric = np.array(maps["efficiency"]["efficiency"], dtype=float)
 
                 finite_metric = metric[np.isfinite(metric)]
-                cmin = float(finite_metric.min()) if finite_metric.size else 0.0
-                cmax = float(finite_metric.max()) if finite_metric.size else 1.0
+                if finite_metric.size:
+                    global_cmin = float(finite_metric.min()) if global_cmin is None else min(global_cmin, float(finite_metric.min()))
+                    global_cmax = float(finite_metric.max()) if global_cmax is None else max(global_cmax, float(finite_metric.max()))
+
+                metric_lookup[float(if_case)] = metric
+
+            if global_cmin is None or global_cmax is None:
+                global_cmin, global_cmax = 0.0, 1.0
+
+            for idx, if_case in enumerate(field_currents):
+                metric = metric_lookup.get(float(if_case))
+                if metric is None:
+                    continue
+
+                omega_grid, torque_grid = np.meshgrid(omega_axis, torque_axis)
+                y_grid = np.full_like(omega_grid, float(if_case))
 
                 omega_ds, y_ds, torque_ds, metric_ds = _decimate_surface_arrays(
                     omega_grid, y_grid, torque_grid, metric
                 )
+
+                finite_mask = np.isfinite(metric_ds)
+                if not finite_mask.any():
+                    continue
+
+                omega_ds = np.where(finite_mask, omega_ds, np.nan)
+                y_ds = np.where(finite_mask, y_ds, np.nan)
+                torque_ds = np.where(finite_mask, torque_ds, np.nan)
+                metric_ds = np.where(finite_mask, metric_ds, np.nan)
 
                 fig.add_trace(
                     go.Surface(
@@ -470,10 +497,10 @@ def update_motor_plots(selected_if, data):
                         z=torque_ds,
                         surfacecolor=metric_ds,
                         colorscale=colorscale,
-                        cmin=cmin,
-                        cmax=cmax,
-                        showscale=if_case == field_currents[-1],
-                        colorbar=dict(title=color_title) if if_case == field_currents[-1] else None,
+                        cmin=global_cmin,
+                        cmax=global_cmax,
+                        showscale=idx == len(field_currents) - 1,
+                        colorbar=dict(title=color_title) if idx == len(field_currents) - 1 else None,
                         opacity=0.9,
                         name=f"I_f={if_case:.3f} A",
                     )

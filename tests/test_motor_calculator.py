@@ -168,3 +168,30 @@ def test_surface_lookup_handles_integer_field_case_keys():
     surface_figs = figures[10:]
 
     assert all(isinstance(fig, go.Figure) for fig in surface_figs)
+
+
+def test_surface_plots_respect_feasible_masks():
+    params = default_machine_params()
+    payload, *_ = compute_motor_maps(
+        0,
+        params.Vdc,
+        params.Ls,
+        params.Lm,
+        params.Rs,
+        params.Rf,
+        params.p,
+        params.wb,
+        params.I0_max,
+        params.If_max,
+        "",
+        ["auto"],
+        params.wmb,
+        200,
+        80,
+        80,
+    )
+
+    figures = update_motor_plots(THREE_D_SENTINEL, payload)
+    power_surface = figures[10]
+
+    assert any(np.isnan(np.array(trace["z"], dtype=float)).any() for trace in power_surface.data)
