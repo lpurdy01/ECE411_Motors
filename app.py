@@ -1,13 +1,16 @@
 """Dash application for visualizing ECE 411 synchronous machine concepts."""
 from __future__ import annotations
 
+import logging
 import math
 import os
 import textwrap
+import sys
 
 import numpy as np
 import plotly.graph_objects as go
-from dash import Dash, Input, Output, dcc, html
+from plotly.subplots import make_subplots
+from dash import Dash, Input, Output, State, dcc, html
 from flask import abort, request
 
 from motor_models import (
@@ -22,12 +25,32 @@ from motor_models import (
     round_rotor_operating_point,
     salient_pole_torque_curves,
     three_phase_waveform,
+    sm_required_voltage_park_pu,
 )
+from motor_tab import build_motor_tab
+
+
+def configure_logging() -> None:
+    """Initialize structured logging suitable for Render and local runs."""
+
+    level_name = os.getenv("APP_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    handler.setFormatter(formatter)
+
+    logging.basicConfig(level=level, handlers=[handler], force=True)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+configure_logging()
+LOG = logging.getLogger(__name__)
 
 APP_TITLE = "ECE 411 Motor Visualization"
 TIME_VECTOR = np.linspace(0.0, 4.0 / 60.0, 600)
 DELTA_RANGE = np.linspace(-math.pi, math.pi, 400)
-
 CHEAT_SHEET_MARKDOWN = textwrap.dedent(
     r"""
     ### Frames & Conventions
@@ -81,6 +104,12 @@ CHEAT_SHEET_MARKDOWN = textwrap.dedent(
     * Required flux: $\Lambda_0 = \sqrt{(V_0/\omega_e)^2 + (L_s I_0)^2}$.
     * Constant-power region: $T_{\max} = V_0 I_0 / \omega_e$, $P_{\max} = V_0 I_0$.
 
+    ### Per-Unit & Inverter Bases
+    * LN peak voltage base: $V_B = V_{dc}/\sqrt{3}$ (consistent with $M_0 = \tfrac{2}{\sqrt{3}} V_{0,pu}$).
+    * Power base: $P_B = 1.5\, V_B\, I_{0,\max}$; current base $I_B = \tfrac{2P_B}{3V_B}$.
+    * Impedance/inductance bases: $Z_B = V_B/I_B$, $L_B = Z_B/\omega_B$.
+    * Mechanical base speed: $\omega_{m,B} = 2\omega_B/p$; torque base: $T_B = (p/2)(P_B/\omega_B)$.
+    
     ### Quick Reference
     * Open circuit → $v_q \approx \omega_e \Lambda_0$, $v_d \approx 0$.
     * Motoring torque is positive when electrical power is absorbed.
@@ -170,7 +199,6 @@ def _angle_arc_traces(
 
     return [arc, label_trace]
 
-
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 
 app = Dash(__name__, suppress_callback_exceptions=True)
@@ -192,7 +220,17 @@ if ACCESS_TOKEN:
 
 app.layout = html.Div(
     [
-        html.H1(APP_TITLE),
+        html.Header(
+            [
+                html.H2(APP_TITLE, style={"margin": 0}),
+                dcc.Loading(
+                    html.Div(id="app-header-status", children="Ready"),
+                    type="dot",
+                    style={"fontWeight": 500},
+                ),
+            ],
+            style={"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "0.25rem"},
+        ),
         html.P(
             "Interactive playground for Clarke/Park transforms, synchronous "
             "machine torque, and field-weakening behavior."
@@ -402,6 +440,7 @@ app.layout = html.Div(
                         className="tab-layout",
                     )
                 ]),
+                dcc.Tab(label="Motor Calculator", value="tab-motor", children=[build_motor_tab()]),
                 dcc.Tab(label="Cheat Sheet", value="tab-cheatsheet", children=[
                     html.Div(
                         dcc.Markdown(
@@ -763,6 +802,8 @@ def update_salient_tab(ld, lq, e0, v0, w_e):
     ).strip()
 
     return fig, summary
+
+
 
 
 if __name__ == "__main__":
