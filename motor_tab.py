@@ -43,6 +43,34 @@ def _parse_field_currents(raw: str, fallback: list[float]) -> list[float]:
         return fallback
 
 
+def _per_if_lookup(per_if: dict, if_value) -> dict | None:
+    """Safely retrieve a per-I_f map regardless of string/float key formatting.
+
+    Dash JSON serialization round-trips numbers and strings differently, so we
+    normalize keys to floats and fall back to approximate matches to avoid
+    KeyError when a user enters integers ("7") but the stored key is "7.0".
+    """
+
+    try:
+        target = float(if_value)
+    except Exception:
+        return None
+
+    direct_keys = {str(if_value), f"{target:g}", f"{target:.6f}"}
+    for key in direct_keys:
+        if key in per_if:
+            return per_if[key]
+
+    for key, value in per_if.items():
+        try:
+            if math.isclose(float(key), target, rel_tol=1e-9, abs_tol=1e-9):
+                return value
+        except Exception:
+            continue
+
+    return None
+
+
 def _input_cell(label: str, component) -> html.Tr:
     return html.Tr([html.Th(label, style={"textAlign": "right", "paddingRight": "0.5rem"}), html.Td(component)])
 
@@ -380,7 +408,8 @@ def update_motor_plots(selected_if, data):
     bases = PUBases(**data["bases"])
     omega_axis = np.array(data["omega_axis"], dtype=float)
     torque_axis = np.array(data["torque_axis"], dtype=float)
-    field_currents = data["field_currents"]
+    field_currents = [float(val) for val in data.get("field_currents", [])]
+    per_if = data.get("per_if", {})
 
     voltage_sweep = data["voltage_sweep"]
     v0_fig = go.Figure()
@@ -410,7 +439,9 @@ def update_motor_plots(selected_if, data):
         def surface_fig(metric_key: str, colorscale: str, color_title: str) -> go.Figure:
             fig = go.Figure()
             for if_case in field_currents:
-                maps = data["per_if"][str(if_case)]
+                maps = _per_if_lookup(per_if, if_case)
+                if maps is None:
+                    continue
                 omega_grid, torque_grid = np.meshgrid(omega_axis, torque_axis)
                 y_grid = np.full_like(omega_grid, float(if_case))
                 if metric_key == "power":
@@ -477,7 +508,7 @@ def update_motor_plots(selected_if, data):
             surface_fig("efficiency", "Blues", "η"),
         )
 
-    maps = data["per_if"].get(str(selected_if))
+    maps = _per_if_lookup(per_if, selected_if)
     if maps is None:
         return no_update
 

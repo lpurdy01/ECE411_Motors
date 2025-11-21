@@ -13,7 +13,14 @@ from motor_models import (
     sm_required_voltage_park,
     sm_required_voltage_park_pu,
 )
-from motor_tab import THREE_D_SENTINEL, _headroom_from_mod_map, compute_motor_maps
+import plotly.graph_objects as go
+
+from motor_tab import (
+    THREE_D_SENTINEL,
+    _headroom_from_mod_map,
+    compute_motor_maps,
+    update_motor_plots,
+)
 
 
 def test_sm_required_voltage_matches_manual():
@@ -131,3 +138,33 @@ def test_compute_motor_maps_includes_surface_option():
     assert options[0]["value"] == THREE_D_SENTINEL
     assert selected != THREE_D_SENTINEL
     assert payload["per_if"]
+
+
+def test_surface_lookup_handles_integer_field_case_keys():
+    params = default_machine_params()
+    payload, *_ = compute_motor_maps(
+        0,
+        params.Vdc,
+        params.Ls,
+        params.Lm,
+        params.Rs,
+        params.Rf,
+        params.p,
+        params.wb,
+        params.I0_max,
+        params.If_max,
+        "7,4,2",
+        ["auto"],
+        params.wmb,
+        200,
+        60,
+        60,
+    )
+
+    # Simulate JSON round-trip that strips trailing decimals ("7.0" -> "7")
+    payload["per_if"] = {key.rstrip("0").rstrip("."): val for key, val in payload["per_if"].items()}
+
+    figures = update_motor_plots(THREE_D_SENTINEL, payload)
+    surface_figs = figures[10:]
+
+    assert all(isinstance(fig, go.Figure) for fig in surface_figs)
