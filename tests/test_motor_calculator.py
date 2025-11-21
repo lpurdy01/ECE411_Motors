@@ -18,7 +18,9 @@ import plotly.graph_objects as go
 from motor_tab import (
     THREE_D_SENTINEL,
     _headroom_from_mod_map,
+    _log_efficiency,
     compute_motor_maps,
+    download_results,
     update_motor_plots,
 )
 
@@ -114,6 +116,16 @@ def test_headroom_helper_caps_values_and_masks():
     assert np.isnan(headroom[0, 1])
 
 
+def test_log_efficiency_spreads_high_values_and_masks_nans():
+    eff = np.array([[0.9, 0.99, np.nan]])
+
+    logged = _log_efficiency(eff)
+
+    assert math.isclose(logged[0, 0], 1.0, rel_tol=1e-6)
+    assert math.isclose(logged[0, 1], 2.0, rel_tol=1e-6)
+    assert math.isnan(logged[0, 2])
+
+
 def test_compute_motor_maps_includes_surface_option():
     params = default_machine_params()
     payload, options, selected, *_ = compute_motor_maps(
@@ -195,3 +207,13 @@ def test_surface_plots_respect_feasible_masks():
     power_surface = figures[10]
 
     assert any(np.isnan(np.array(trace["z"], dtype=float)).any() for trace in power_surface.data)
+
+
+def test_download_results_returns_zip_payload():
+    payload = {"params": {}, "bases": {}, "omega_axis": [], "torque_axis": []}
+
+    response = download_results(1, payload)
+
+    assert response["filename"] == "motor_results.zip"
+    assert response["base64"] is True
+    assert isinstance(response["content"], str)

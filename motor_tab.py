@@ -364,6 +364,21 @@ def _headroom_from_mod_map(mod_map: dict) -> np.ndarray:
     return headroom
 
 
+def _log_efficiency(eff_map: np.ndarray) -> np.ndarray:
+    """Return ``-log10(1-η)`` so values near unity are spread out for plotting.
+
+    Any non-finite entries remain NaN so feasibility masking still applies.
+    """
+
+    eta = np.array(eff_map, dtype=float)
+    logged = np.full_like(eta, np.nan, dtype=float)
+    finite = np.isfinite(eta)
+    if finite.any():
+        inefficiency = np.clip(1.0 - eta[finite], 1e-6, None)
+        logged[finite] = -np.log10(inefficiency)
+    return logged
+
+
 def _decimate_surface_arrays(x_grid: np.ndarray, y_grid: np.ndarray, z_grid: np.ndarray, metric: np.ndarray):
     row_step = max(1, math.ceil(metric.shape[0] / SURFACE_POINTS))
     col_step = max(1, math.ceil(metric.shape[1] / SURFACE_POINTS))
@@ -457,7 +472,7 @@ def update_motor_plots(selected_if, data):
                 elif metric_key == "loss":
                     metric = np.array(maps["loss"]["loss_kw"], dtype=float)
                 else:
-                    metric = np.array(maps["efficiency"]["efficiency"], dtype=float)
+                    metric = _log_efficiency(maps["efficiency"]["efficiency"])
 
                 finite_metric = metric[np.isfinite(metric)]
                 if finite_metric.size:
@@ -532,7 +547,7 @@ def update_motor_plots(selected_if, data):
             surface_fig("modulation", "Plasma", "M₀"),
             surface_fig("headroom", "Cividis", "Headroom"),
             surface_fig("loss", "Magma", "P_loss"),
-            surface_fig("efficiency", "Blues", "η"),
+            surface_fig("efficiency", "Blues", "−log₁₀(1−η)"),
         )
 
     maps = _per_if_lookup(per_if, selected_if)
@@ -655,10 +670,12 @@ def update_motor_plots(selected_if, data):
         go.Contour(
             x=eff_map["omega_m"][0, :],
             y=eff_map["torque"][:, 0],
-            z=eff_map["efficiency"],
+            z=_log_efficiency(eff_map["efficiency"]),
+            customdata=eff_map["efficiency"],
             colorscale="Blues",
-            colorbar=dict(title="η"),
+            colorbar=dict(title="−log₁₀(1−η)"),
             contours=dict(showlabels=True),
+            hovertemplate="ωₘ=%{x:.1f} rad/s<br>Tₑ=%{y:.1f} N·m<br>η=%{customdata:.4f}<extra></extra>",
         )
     )
     eff_fig.update_layout(
@@ -733,4 +750,4 @@ def download_results(n_clicks, data):
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("motor_results.json", json.dumps(data))
     buffer.seek(0)
-    return dcc.send_bytes(buffer.read, filename="motor_results.zip")
+    return dcc.send_bytes(lambda io_buf: io_buf.write(buffer.getvalue()), filename="motor_results.zip")
