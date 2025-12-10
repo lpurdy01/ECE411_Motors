@@ -349,7 +349,14 @@ app.layout = html.Div(
                                     html.Label("E₀ (pu)"),
                                     dcc.Slider(id="round-e0", min=0.3, max=1.5, step=0.05, value=0.9),
                                     html.Label("ωₑ (pu)"),
-                                    dcc.Slider(id="round-we", min=0.3, max=2.0, step=0.05, value=1.0),
+                                    dcc.Slider(
+                                        id="round-we",
+                                        min=-2.0,
+                                        max=2.0,
+                                        step=0.05,
+                                        value=1.0,
+                                        marks={-2.0: "-2", -1.0: "-1", 0.0: "0", 1.0: "1", 2.0: "2"},
+                                    ),
                                     html.Label("δ (deg)"),
                                     dcc.Slider(id="round-delta", min=-90, max=90, step=1, value=20),
                                 ],
@@ -357,11 +364,41 @@ app.layout = html.Div(
                             ),
                             html.Div(
                                 [
-                                    dcc.Graph(id="round-phasor"),
-                                    dcc.Markdown(
-                                        id="round-summary",
-                                        mathjax=True,
-                                        style={"backgroundColor": "#f8f9fa", "padding": "0.75rem"},
+                                    dcc.Tabs(
+                                        id="round-subtabs",
+                                        value="round-sub-phasor",
+                                        children=[
+                                            dcc.Tab(
+                                                label="Phasor view",
+                                                value="round-sub-phasor",
+                                                children=[
+                                                    dcc.Graph(id="round-phasor"),
+                                                    dcc.Markdown(
+                                                        id="round-summary",
+                                                        mathjax=True,
+                                                        style={
+                                                            "backgroundColor": "#f8f9fa",
+                                                            "padding": "0.75rem",
+                                                        },
+                                                    ),
+                                                ],
+                                            ),
+                                            dcc.Tab(
+                                                label="Quadrant explorer",
+                                                value="round-sub-quadrant",
+                                                children=[
+                                                    dcc.Graph(id="round-quadrant"),
+                                                    dcc.Markdown(
+                                                        id="round-quadrant-summary",
+                                                        mathjax=True,
+                                                        style={
+                                                            "backgroundColor": "#f8f9fa",
+                                                            "padding": "0.75rem",
+                                                        },
+                                                    ),
+                                                ],
+                                            ),
+                                        ],
                                     ),
                                 ],
                                 className="tab-plots",
@@ -557,6 +594,8 @@ def update_frames_tab(amplitude, frequency, phase, harmonic_order, harmonic_rati
 @app.callback(
     Output("round-phasor", "figure"),
     Output("round-summary", "children"),
+    Output("round-quadrant", "figure"),
+    Output("round-quadrant-summary", "children"),
     Input("round-rs", "value"),
     Input("round-ls", "value"),
     Input("round-v0", "value"),
@@ -580,6 +619,15 @@ def update_round_tab(rs, ls, v0, e0, w_e, delta_deg):
         angle_rad = math.atan2(value.imag, value.real)
         angle_deg = math.degrees(angle_rad)
         return magnitude, angle_deg, angle_rad
+
+    def _wrap_angle_rad(angle: float) -> float:
+        """Wrap an angle to [-π, π] for clear annotations."""
+
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle <= -math.pi:
+            angle += 2.0 * math.pi
+        return angle
 
     fig = go.Figure()
 
@@ -665,6 +713,9 @@ def update_round_tab(rs, ls, v0, e0, w_e, delta_deg):
         margin=dict(l=40, r=20, t=60, b=40),
     )
 
+    theta_i_v = _wrap_angle_rad(angles_rad.get("Stator I", 0.0) - angles_rad.get("Terminal V", 0.0))
+    flux_angle_deg = math.degrees(angles_rad.get("Flux Λ₀", angles_rad.get("Internal E", 0.0)))
+
     summary = textwrap.dedent(
         fr"""
         **Round-rotor steady state**
@@ -678,11 +729,110 @@ def update_round_tab(rs, ls, v0, e0, w_e, delta_deg):
 
         Power factor $\cos\varphi = {op['pf']:.3f}$ (ϕ = {math.degrees(op['pf_angle']):.1f}°)
         $|I| = {op['i_mag']:.3f}$ pu
+        Current is {'leading' if theta_i_v > 0 else 'lagging' if theta_i_v < 0 else 'in phase with'} $V$ (θ = {math.degrees(theta_i_v):.1f}°)
         {flux_summary}
+        Flux angle ∠Λ₀ = {flux_angle_deg:.1f}°
         """
     ).strip()
 
-    return fig, summary
+    def _quadrant_label(speed: float, torque: float) -> tuple[str, str]:
+        """Classify the operating quadrant using torque and electrical speed."""
+
+        if abs(speed) < 1e-6 or abs(torque) < 1e-6:
+            return "Axis crossing", "Power changes sign when either torque or speed flips."
+
+        if speed > 0 and torque > 0:
+            return "QI (Motoring)", "Electrical power absorbed; torque assists positive speed."
+        if speed < 0 and torque > 0:
+            return "QII (Generating)", "Torque resists negative speed so electrical power is delivered."
+        if speed < 0 and torque < 0:
+            return "QIII (Motoring)", "Machine pulls mechanical power from the negative-speed shaft."
+        return "QIV (Generating)", "Torque opposes positive speed and exports electrical power."
+
+    quadrant_name, quadrant_blurb = _quadrant_label(w_e, op["torque"])
+    mech_power = op["torque"] * w_e
+
+    torque_span = max(1.2, abs(op["torque"]) * 1.4)
+    speed_span = max(1.2, abs(w_e) * 1.4)
+    axis_span = max(torque_span, speed_span)
+
+    quadrant_fig = go.Figure()
+    quadrant_fig.update_layout(
+        title="4-Quadrant Operating Point",
+        xaxis_title="Electrical speed ωₑ (pu)",
+        yaxis_title="Electromagnetic torque Tₑ (pu)",
+        xaxis=dict(range=[-axis_span, axis_span], zeroline=True, zerolinewidth=2),
+        yaxis=dict(range=[-axis_span, axis_span], zeroline=True, zerolinewidth=2, scaleanchor="x"),
+        margin=dict(l=40, r=20, t=60, b=40),
+        legend=dict(bgcolor="rgba(255,255,255,0.85)", bordercolor="#cccccc", borderwidth=1),
+    )
+
+    quadrant_colors = {
+        "QI (Motoring)": "rgba(0, 200, 150, 0.12)",
+        "QII (Generating)": "rgba(66, 133, 244, 0.12)",
+        "QIII (Motoring)": "rgba(255, 193, 7, 0.14)",
+        "QIV (Generating)": "rgba(239, 83, 80, 0.12)",
+    }
+
+    quadrant_fig.add_shape(type="rect", x0=0, x1=axis_span, y0=0, y1=axis_span, fillcolor=quadrant_colors["QI (Motoring)"], line_width=0, layer="below")
+    quadrant_fig.add_shape(type="rect", x0=-axis_span, x1=0, y0=0, y1=axis_span, fillcolor=quadrant_colors["QII (Generating)"], line_width=0, layer="below")
+    quadrant_fig.add_shape(type="rect", x0=-axis_span, x1=0, y0=-axis_span, y1=0, fillcolor=quadrant_colors["QIII (Motoring)"], line_width=0, layer="below")
+    quadrant_fig.add_shape(type="rect", x0=0, x1=axis_span, y0=-axis_span, y1=0, fillcolor=quadrant_colors["QIV (Generating)"], line_width=0, layer="below")
+
+    quadrant_fig.add_annotation(x=axis_span * 0.55, y=axis_span * 0.55, text="QI Motoring", showarrow=False, font=dict(color="#008f6b", size=12))
+    quadrant_fig.add_annotation(x=-axis_span * 0.55, y=axis_span * 0.55, text="QII Generating", showarrow=False, font=dict(color="#1a73e8", size=12))
+    quadrant_fig.add_annotation(x=-axis_span * 0.55, y=-axis_span * 0.55, text="QIII Motoring", showarrow=False, font=dict(color="#c58c00", size=12))
+    quadrant_fig.add_annotation(x=axis_span * 0.55, y=-axis_span * 0.55, text="QIV Generating", showarrow=False, font=dict(color="#c62828", size=12))
+
+    quadrant_fig.add_trace(
+        go.Scatter(
+            x=[w_e],
+            y=[op["torque"]],
+            mode="markers+text",
+            name="Operating point",
+            marker=dict(color="#111111", size=12),
+            text=[quadrant_name],
+            textposition="top center",
+            hovertemplate=(
+                "ωₑ = %{x:.3f} pu" "<br>Tₑ = %{y:.3f} pu" "<extra></extra>"
+            ),
+        )
+    )
+
+    quadrant_fig.add_trace(
+        go.Scatter(
+            x=[0, w_e],
+            y=[0, 0],
+            mode="lines",
+            line=dict(color="#1f77b4", width=3, dash="dot"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    quadrant_fig.add_trace(
+        go.Scatter(
+            x=[w_e, w_e],
+            y=[0, op["torque"]],
+            mode="lines",
+            line=dict(color="#ff7f0e", width=3, dash="dot"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    quadrant_summary = textwrap.dedent(
+        fr"""
+        **Quadrant explorer**
+
+        * {quadrant_name}: {quadrant_blurb}
+        * Electromechanical power $P_{{mech}} = T_e\,\omega_e = {mech_power:.3f}$ pu (sign matches generation when negative).
+        * Torque follows $T_e \propto |V|\,|E|\sin\delta$: flipping δ flips torque for fixed magnitudes.
+        * Current angle θ = {math.degrees(theta_i_v):.1f}° sets leading/lagging and whether flux (∠Λ₀ = {flux_angle_deg:.1f}°) leads or lags $V$.
+        * Generating quadrants occur when torque and speed signs differ; motoring when they match.
+        """
+    ).strip()
+
+    return fig, summary, quadrant_fig, quadrant_summary
 
 
 @app.callback(
