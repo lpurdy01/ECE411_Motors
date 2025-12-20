@@ -233,13 +233,19 @@ def round_rotor_operating_point(params: RoundRotorParams, delta: float) -> dict:
     ed = 0.0
 
     wls = params.w_e * params.ls
-    matrix = np.array([[params.rs, wls], [-wls, params.rs]], dtype=float)
-    rhs = np.array([vq - eq, vd - ed], dtype=float)
-    iq, id_ = np.linalg.solve(matrix, rhs)
+    # Guard against the singular R_s = 0, ω_e = 0 case where the impedance
+    # matrix collapses to zeros and np.linalg.solve would raise.
+    if abs(params.rs) < 1e-9 and abs(wls) < 1e-9:
+        iq = 0.0
+        id_ = 0.0
+    else:
+        matrix = np.array([[params.rs, wls], [-wls, params.rs]], dtype=float)
+        rhs = np.array([vq - eq, vd - ed], dtype=float)
+        iq, id_ = np.linalg.solve(matrix, rhs)
 
     i_mag = math.hypot(iq, id_)
     power = THREE_HALVES * (vq * iq + vd * id_)
-    torque = power / params.w_e if params.w_e != 0 else float("nan")
+    torque = power / params.w_e if params.w_e != 0 else 0.0
 
     voltage_drop_res = params.rs * (iq + 1j * id_)
     voltage_drop_sync = 1j * params.w_e * params.ls * (iq + 1j * id_)
