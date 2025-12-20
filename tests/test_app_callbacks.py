@@ -23,10 +23,18 @@ def test_update_frames_tab_manual_theta_changes_summary():
 
 
 def test_update_round_tab_summary_contains_expected_values():
-    fig, summary = update_round_tab(0.1, 0.5, 1.0, 0.9, 1.0, 15)
-    assert fig.data
+    fig, summary, quadrant_fig, quadrant_summary = update_round_tab(0.1, 0.5, 1.0, 0.9, 1.0, 15)
+    assert fig.data and quadrant_fig.data
     assert "Round-rotor steady state" in summary
     assert "V_q" in summary and "V_d" in summary
+    assert "Quadrant explorer" in quadrant_summary
+
+
+def test_update_round_tab_handles_zero_speed_zero_resistance():
+    fig, summary, quadrant_fig, quadrant_summary = update_round_tab(0.0, 0.5, 1.0, 0.9, 0.0, 0)
+    assert fig.data and quadrant_fig.data
+    assert "Λ₀ undefined" in summary
+    assert "Axis crossing" in quadrant_summary
 
 
 def test_update_field_weakening_res_zero_matches_closed_form():
